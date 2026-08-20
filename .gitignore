@@ -1,0 +1,11 @@
+# User-specific gateway configuration (generated from template)
+gateway.toml
+
+# JWT signing keys (never commit secrets)
+*.pem
+*.key
+kid
+
+# Backups
+backup-*/
+*.backup

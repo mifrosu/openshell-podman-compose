@@ -1,6 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+# ============================================================================
+# WARNING: This is a TEMPLATE file. Do not edit it directly!
+# ============================================================================
+# Run ./setup.sh to generate gateway.toml with your user-specific paths.
+# The generated gateway.toml is git-ignored and should not be committed.
+# ============================================================================
+
 # OpenShell gateway TOML configuration — Podman compute driver.
 #
 # This file is the primary configuration source for compose.yaml in this
@@ -40,10 +47,20 @@ log_level           = "info"
 compute_drivers     = ["podman"]
 disable_tls         = true
 
-# Allow unauthenticated user access for local single-user development.
+# Allow unauthenticated CLI access for local single-user development.
 # Sandboxes still receive JWT tokens for authenticating their callbacks.
 [openshell.gateway.auth]
 allow_unauthenticated_users = true
+
+# Gateway JWT configuration for sandbox authentication.
+# The __HOME__ placeholder is replaced by setup.sh with your actual home directory.
+# DO NOT EDIT THIS TEMPLATE - run ./setup.sh to regenerate gateway.toml.
+[openshell.gateway.gateway_jwt]
+signing_key_path = "__HOME__/.config/openshell/jwt/signing.pem"
+public_key_path  = "__HOME__/.config/openshell/jwt/public.pem"
+kid_path         = "__HOME__/.config/openshell/jwt/kid"
+ttl_secs         = 0
+gateway_id       = "openshell"
 
 [openshell.drivers.podman]
 # Default image pulled for `openshell sandbox create` without --from.

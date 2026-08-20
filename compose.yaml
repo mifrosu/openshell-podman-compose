@@ -138,6 +138,11 @@ services:
       # Read-only + :z SELinux relabel (see note above).
       - ./gateway.toml:/etc/openshell/gateway.toml:ro,z
 
+      # JWT signing keys for sandbox authentication.
+      # Generated with: openssl genpkey -algorithm ed25519
+      # Read-only + :z SELinux relabel.
+      - ${HOME}/.config/openshell/jwt:${HOME}/.config/openshell/jwt:ro,z
+
     environment:
       # Point the gateway at the TOML config file mounted above.
       OPENSHELL_GATEWAY_CONFIG: /etc/openshell/gateway.toml
