@@ -58,6 +58,7 @@
 services:
   gateway:
     image: ghcr.io/nvidia/openshell/gateway:${IMAGE_TAG:-latest}
+    container_name: openshell-gateway
     restart: unless-stopped
 
     # Clear the default CMD so gateway.toml owns all settings (see note above).
@@ -93,6 +94,13 @@ services:
       # Health endpoint  (GET /healthz, GET /readyz)
       - "127.0.0.1:${OPENSHELL_HEALTH_PORT:-8081}:8081"
     
+    # Join the openshell bridge network in addition to the compose default network.
+    # Sandboxes run on the openshell network and need to reach the gateway
+    # directly via the bridge (not routing through the host). This avoids
+    # exposing the unauthenticated gateway on 0.0.0.0 to the external network.
+    networks:
+      openshell:
+
     extra_hosts:
       - "host.containers.internal:host-gateway"
       - "host.openshell.internal:host-gateway"
@@ -157,3 +165,19 @@ services:
       # Point it inside the mounted, writable data dir so all persistent state
       # lives under the single ~/.local/share/openshell bind mount.
       XDG_STATE_HOME: ${HOME}/.local/share/openshell/state
+
+networks:
+  # The openshell network is created externally by the Podman driver on first
+  # gateway startup. The gateway must join this network so sandbox containers
+  # can reach it directly via the bridge, avoiding the need to publish the
+  # unauthenticated gateway API on 0.0.0.0 (external network exposure).
+  openshell:
+    external: true
+
+networks:
+  # The openshell network is created externally by the Podman driver on first
+  # gateway startup. The gateway must join this network so sandbox containers
+  # can reach it directly via the bridge, avoiding the need to publish the
+  # unauthenticated gateway API on 0.0.0.0 (external network exposure).
+  openshell:
+    external: true

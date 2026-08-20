@@ -24,9 +24,11 @@
 version = 1
 
 [openshell.gateway]
-# Bind to loopback only.  The Podman driver adds an extra listener on the
-# bridge interface automatically so sandbox containers can reach the gateway.
-bind_address        = "127.0.0.1:8080"
+# Bind to all interfaces inside the container so sandbox containers on the
+# openshell bridge network can reach the gateway directly. The gateway joins
+# the openshell network via compose.yaml, so it gets a bridge IP and sandboxes
+# can connect without routing through the host.
+bind_address        = "0.0.0.0:8080"
 # Bind the health server to 0.0.0.0 inside the container so the published host
 # port (127.0.0.1:8081 -> container:8081 in compose.yaml) can reach it. Unlike
 # the primary gRPC port, the Podman driver does NOT add an extra bridge listener
@@ -50,8 +52,7 @@ supervisor_image  = "ghcr.io/nvidia/openshell/supervisor:latest"
 # equivalent).
 image_pull_policy = "missing"
 # Address sandbox containers use to call back to the gateway.
-# The Podman driver replaces the host with host.containers.internal and the
-# port with the gateway's own bind port (8080).  Only the scheme survives.
-# The gateway must be published on port 8080 on the Podman host so that
-# host.containers.internal:8080 resolves to the gateway container.
-grpc_endpoint     = "http://host.containers.internal:8080"
+# Both the gateway and sandboxes run on the openshell bridge network, so
+# sandboxes can reach the gateway directly via Podman's built-in DNS using the
+# gateway's container name (set in compose.yaml). No host routing needed.
+grpc_endpoint     = "http://openshell-gateway:8080"
