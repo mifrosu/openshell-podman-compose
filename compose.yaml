@@ -63,6 +63,24 @@ services:
     # Clear the default CMD so gateway.toml owns all settings (see note above).
     command: []
 
+    # Run as internal UID 0. In this rootless Podman setup, container UID 0 maps
+    # to the host user (michael) who owns the Podman socket, the data directory,
+    # and gateway.toml. Running as the image's default UID 1000 instead maps to
+    # an unrelated high subuid (see /etc/subuid), which cannot access the
+    # host-owned Podman socket ("/var/run/podman.sock: Permission denied") and
+    # would require chowning the data dir. Running as 0:0 keeps all host files
+    # owned by michael and grants socket access with no uid juggling.
+    user: "0:0"
+
+    # Disable SELinux confinement for this container. Its sole purpose is to
+    # drive the host Podman socket to create sibling sandbox containers, which
+    # requires access the default container_t domain forbids — even as UID 0 the
+    # gateway otherwise gets "/var/run/podman.sock: Permission denied (os error
+    # 13)" on SELinux-enforcing hosts (Fedora Silverblue). This is the standard
+    # approach for a Podman-socket management container.
+    security_opt:
+      - label=disable
+
     ports:
       # gRPC / control-plane API  (used by the openshell CLI and sandbox callbacks)
       # The Podman driver injects host.containers.internal:<gateway-port> into sandbox
@@ -81,6 +99,10 @@ services:
 
     volumes:
       # Podman socket — lets the gateway create and manage sandbox containers.
+      # No :z relabel here: relabeling the live host socket to container_file_t
+      # can disrupt the host Podman service. SELinux access is instead granted
+      # via security_opt: label=disable above, and UID access via user: "0:0"
+      # (container UID 0 == host michael == socket owner).
       - $XDG_RUNTIME_DIR/podman/podman.sock:/var/run/podman.sock
 
       # Data directory — must be a bind-mount with source == target so that
@@ -88,19 +110,25 @@ services:
       # creates sandbox containers (see note above).
       # Using home directory path that matches on both host and container.
       # This is required for Fedora Silverblue where system paths are immutable.
-      - type: bind
-        source: ${HOME}/.local/share/openshell
-        target: ${HOME}/.local/share/openshell
-        bind:
-          create_host_path: true
+      #
+      # NOTE: short-string syntax is used (with the :z suffix) instead of the
+      # long "type: bind" form because podman-compose does not honor
+      # x-podman.mount-options / SELinux options on long-syntax mounts.
+      #   :z  — SELinux relabel to container_file_t so the container can access
+      #         the files on SELinux-enforcing hosts (Fedora Silverblue).
+      #         Without it the gateway fails to read/write here with
+      #         "Permission denied (os error 13)" / "unable to open database
+      #         file" (SQLite code 14).
+      # No :U chown is needed: with user: "0:0" the container writes as the host
+      # user (michael) who already owns this directory. Files created here
+      # (gateway.db, extracted supervisor binary, state/) stay owned by michael.
+      - ${HOME}/.local/share/openshell:${HOME}/.local/share/openshell:z
 
       # TOML config — all gateway and driver settings live here.
       # Podman Compose resolves ./ relative to the directory that contains this
       # compose.yaml file, not the CWD of the caller.
-      - type: bind
-        source: ./gateway.toml
-        target: /etc/openshell/gateway.toml
-        read_only: true
+      # Read-only + :z SELinux relabel (see note above).
+      - ./gateway.toml:/etc/openshell/gateway.toml:ro,z
 
     environment:
       # Point the gateway at the TOML config file mounted above.
@@ -120,3 +148,12 @@ services:
       # bind-mounted directory so its path is resolvable by the host Podman daemon.
       XDG_DATA_HOME: ${HOME}/.local/share
       HOME: ${HOME}
+
+      # State directory (credential key-encryption key, local TLS material, etc.).
+      # The gateway resolves this via XDG_STATE_HOME, defaulting to
+      # $HOME/.local/state/openshell. That default path is NOT bind-mounted into
+      # the container, so the gateway fails to create
+      # $XDG_STATE_HOME/openshell/gateway/credentials/key-encryption-key.bin.
+      # Point it inside the mounted, writable data dir so all persistent state
+      # lives under the single ~/.local/share/openshell bind mount.
+      XDG_STATE_HOME: ${HOME}/.local/share/openshell/state

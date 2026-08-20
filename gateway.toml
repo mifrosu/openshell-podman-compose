@@ -27,7 +27,13 @@ version = 1
 # Bind to loopback only.  The Podman driver adds an extra listener on the
 # bridge interface automatically so sandbox containers can reach the gateway.
 bind_address        = "127.0.0.1:8080"
-health_bind_address = "127.0.0.1:8081"
+# Bind the health server to 0.0.0.0 inside the container so the published host
+# port (127.0.0.1:8081 -> container:8081 in compose.yaml) can reach it. Unlike
+# the primary gRPC port, the Podman driver does NOT add an extra bridge listener
+# for the health port, so leaving this at 127.0.0.1 makes it reachable only from
+# the container's own loopback and the host health check fails with a connection
+# reset. The host publish rule still restricts external exposure to loopback.
+health_bind_address = "0.0.0.0:8081"
 log_level           = "info"
 compute_drivers     = ["podman"]
 disable_tls         = true
@@ -39,9 +45,10 @@ default_image     = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
 # first start.  The binary is cached to XDG_DATA_HOME and reused on restart.
 supervisor_image  = "ghcr.io/nvidia/openshell/supervisor:latest"
 # Only pull images that are not already cached locally.
-image_pull_policy = "IfNotPresent"
-# Prefix applied to sandbox container names.
-sandbox_namespace = "openshell"
+# Valid values: "always", "missing", "never", "newer". "missing" pulls only
+# when the image is not already present locally (the Docker/K8s "IfNotPresent"
+# equivalent).
+image_pull_policy = "missing"
 # Address sandbox containers use to call back to the gateway.
 # The Podman driver replaces the host with host.containers.internal and the
 # port with the gateway's own bind port (8080).  Only the scheme survives.
