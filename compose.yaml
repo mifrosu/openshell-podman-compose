@@ -1,0 +1,122 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# OpenShell gateway — podman compose setup (Podman compute driver)
+#
+# Quick start:
+#
+#   1. Start the gateway:
+#        podman compose up -d
+#
+#   2. Register the gateway with the CLI (one-time):
+#        openshell gateway add http://localhost:8080 --name openshell-podman
+#
+#   3. Configure an AI provider (example: Anthropic):
+#        ANTHROPIC_API_KEY=sk-ant-... \
+#          openshell provider create --type anthropic --from-existing
+#
+#   4. Create a sandboxed agent — Claude Code:
+#        openshell sandbox create -- claude
+#      For OpenClaw, use NemoClaw: https://github.com/NVIDIA/NemoClaw
+#
+# Sandbox containers are managed by the gateway, not by this Compose file.
+# Each `openshell sandbox create` call launches a fresh container; the gateway
+# tracks their lifecycle.
+#
+# Configuration:
+#   All gateway and driver settings live in gateway.toml in this directory.
+#   Three values cannot be expressed in the TOML file and remain as env vars:
+#     - OPENSHELL_DB_URL  (explicitly blocked from the config file to prevent
+#                          secrets from being committed to VCS)
+#     - XDG_DATA_HOME / HOME  (OS-level path-resolution vars outside the
+#                               gateway config schema)
+#
+# command: [] note:
+#   The gateway image's default CMD is ["--bind-address", "0.0.0.0", "--port",
+#   "8080"].  CLI flags beat TOML in the merge order, so without clearing the
+#   CMD the TOML's bind_address = "127.0.0.1:8080" is silently ignored and the
+#   gateway binds 0.0.0.0.  Setting command: [] lets the TOML file own all
+#   gateway settings.
+#
+# Data directory note:
+#   ${HOME}/.local/share/openshell is bind-mounted at the SAME absolute path in
+#   both the host and the container.  This is required so that the supervisor
+#   binary extracted from the supervisor image can be passed to Podman as a
+#   host-side bind-mount source when sandbox containers are created.  Named
+#   volumes cannot be used here because Podman resolves bind-mount sources
+#   against the host filesystem, not the container filesystem.
+#   A home-directory path is used (rather than /var/lib/openshell) because
+#   Fedora Silverblue's system directories are immutable / read-only.
+#
+# Linux note:
+#   host.containers.internal and host.openshell.internal are mapped via
+#   extra_hosts under the gateway service:
+#     extra_hosts:
+#       - "host.containers.internal:host-gateway"
+#       - "host.openshell.internal:host-gateway"
+
+services:
+  gateway:
+    image: ghcr.io/nvidia/openshell/gateway:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+
+    # Clear the default CMD so gateway.toml owns all settings (see note above).
+    command: []
+
+    ports:
+      # gRPC / control-plane API  (used by the openshell CLI and sandbox callbacks)
+      # The Podman driver injects host.containers.internal:<gateway-port> into sandbox
+      # containers as the callback endpoint.  The gateway's internal port is 8080, so
+      # host port 8080 must be published at the same number so that
+      # host.containers.internal:8080 routes to the gateway container.
+      # gateway.toml binds to 127.0.0.1 — the Podman driver adds the bridge listener
+      # automatically so sandbox containers can reach the gateway without 0.0.0.0.
+      - "127.0.0.1:${OPENSHELL_PORT:-8080}:8080"
+      # Health endpoint  (GET /healthz, GET /readyz)
+      - "127.0.0.1:${OPENSHELL_HEALTH_PORT:-8081}:8081"
+    
+    extra_hosts:
+      - "host.containers.internal:host-gateway"
+      - "host.openshell.internal:host-gateway"
+
+    volumes:
+      # Podman socket — lets the gateway create and manage sandbox containers.
+      - $XDG_RUNTIME_DIR/podman/podman.sock:/var/run/podman.sock
+
+      # Data directory — must be a bind-mount with source == target so that
+      # paths written inside the container are resolvable by Podman when it
+      # creates sandbox containers (see note above).
+      # Using home directory path that matches on both host and container.
+      # This is required for Fedora Silverblue where system paths are immutable.
+      - type: bind
+        source: ${HOME}/.local/share/openshell
+        target: ${HOME}/.local/share/openshell
+        bind:
+          create_host_path: true
+
+      # TOML config — all gateway and driver settings live here.
+      # Podman Compose resolves ./ relative to the directory that contains this
+      # compose.yaml file, not the CWD of the caller.
+      - type: bind
+        source: ./gateway.toml
+        target: /etc/openshell/gateway.toml
+        read_only: true
+
+    environment:
+      # Point the gateway at the TOML config file mounted above.
+      OPENSHELL_GATEWAY_CONFIG: /etc/openshell/gateway.toml
+      OPENSHELL_PODMAN_SOCKET: /var/run/podman.sock
+      OPENSHELL_DRIVERS: podman
+
+      # Database URL cannot be set in the TOML config file — it is explicitly
+      # blocked there to prevent credential-bearing URLs (e.g. postgresql://user:pass@host/db)
+      # from being committed to VCS.  A plain SQLite path contains no credentials, so it
+      # is safe to include here.  Swap this for a real DSN via an env file or secret if
+      # you switch to an external database.
+      OPENSHELL_DB_URL: "sqlite:${HOME}/.local/share/openshell/gateway.db?mode=rwc"
+
+      # XDG path variables are OS-level; they are not part of the gateway config
+      # schema.  Setting them ensures the extracted supervisor binary lands in the
+      # bind-mounted directory so its path is resolvable by the host Podman daemon.
+      XDG_DATA_HOME: ${HOME}/.local/share
+      HOME: ${HOME}
