@@ -173,11 +173,3 @@ networks:
   # unauthenticated gateway API on 0.0.0.0 (external network exposure).
   openshell:
     external: true
-
-networks:
-  # The openshell network is created externally by the Podman driver on first
-  # gateway startup. The gateway must join this network so sandbox containers
-  # can reach it directly via the bridge, avoiding the need to publish the
-  # unauthenticated gateway API on 0.0.0.0 (external network exposure).
-  openshell:
-    external: true
